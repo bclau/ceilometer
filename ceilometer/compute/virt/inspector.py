@@ -107,6 +107,9 @@ class InspectorException(Exception):
 class InstanceNotFoundException(InspectorException):
     pass
 
+class InstanceNotFoundException(InspectorException):
+    pass
+
 
 # Main virt inspector abstraction layering over the hypervisor API.
 #
