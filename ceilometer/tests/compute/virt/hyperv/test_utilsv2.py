@@ -18,7 +18,7 @@ Tests for Hyper-V utilsv2.
 """
 
 import mock
-
+import pkg_resources
 from ceilometer.compute.virt.hyperv import utilsv2 as utilsv2
 from ceilometer.compute.virt import inspector
 from ceilometer.openstack.common import test
@@ -27,6 +27,9 @@ from ceilometer.openstack.common import test
 class TestUtilsV2(test.BaseTestCase):
 
     _FAKE_RETURN_CLASS = 'fake_return_class'
+    _FAKE_INSTANCE = "fake_instance"
+    _MEMORY_SETTING = "Msvm_MemorySettingData"
+    _MEMORY_METRIC_NAME = "Average Memory Utilization"
 
     def setUp(self):
         self._utils = utilsv2.UtilsV2()
@@ -34,6 +37,35 @@ class TestUtilsV2(test.BaseTestCase):
         self._utils._conn_cimv2 = mock.MagicMock()
 
         super(TestUtilsV2, self).setUp()
+
+    @mock.patch('ceilometer.compute.virt.hyperv.utilsv2.UtilsV2._get_metrics')
+    @mock.patch('ceilometer.compute.virt.hyperv.utilsv2.UtilsV2.'
+                '_get_metric_def')
+    @mock.patch('ceilometer.compute.virt.hyperv.utilsv2.UtilsV2.'
+                '_get_vm_resources')
+    @mock.patch('ceilometer.compute.virt.hyperv.utilsv2.UtilsV2._lookup_vm')
+    def test_get_memory_usage(self, mock_lookup_vm, mock_get_vm_resources,
+                              mock_get_metric_def, mock_get_metrics):
+        mock_vm = mock_lookup_vm.return_value
+        mock_memory = mock.MagicMock()
+        mock_get_vm_resources.return_value = [mock_memory]
+
+        mock_metric_def = mock_get_metric_def.return_value
+
+        metric_memory = mock.MagicMock()
+        metric_memory.MetricValue = 3
+        mock_get_metrics.return_value = [metric_memory]
+
+        response = self._utils.get_memory_usage(self._FAKE_INSTANCE)
+
+        mock_lookup_vm.assert_called_once_with(self._FAKE_INSTANCE)
+        mock_get_vm_resources.assert_called_once_with(
+            mock_vm, self._utils._MEMORY_SETTING)
+        mock_get_metric_def.assert_called_once_with(
+            self._utils._MEMORY_METRIC_NAME)
+        mock_get_metrics.assert_called_once_with(mock_memory, mock_metric_def)
+
+        self.assertEquals(response, 3)
 
     def test_get_host_cpu_info(self):
         _fake_clock_speed = 1000

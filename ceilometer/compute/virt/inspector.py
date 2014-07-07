@@ -205,6 +205,7 @@ class Inspector(object):
                inspected
         :return: the amount of memory used
         """
+
         raise NotImplementedError()
 
     def inspect_disk_rates(self, instance, duration=None):

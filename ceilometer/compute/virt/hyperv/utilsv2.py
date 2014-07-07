@@ -51,6 +51,8 @@ class UtilsV2(object):
     _VS_SETTING_DATA = 'Msvm_VirtualSystemSettingData'
     _METRICS_ME = 'Msvm_MetricForME'
     _BASE_METRICS_VALUE = 'Msvm_BaseMetricValue'
+    _MEMORY_METRIC_NAME = "Average Memory Utilization"
+    _MEMORY_SETTING = "Msvm_MemorySettingData"
 
     _CPU_METRIC_NAME = 'Aggregated Average CPU Utilization'
     _NET_IN_METRIC_NAME = 'Filtered Incoming Network Traffic'
@@ -96,6 +98,16 @@ class UtilsV2(object):
         return (cpu_used,
                 int(cpu_sd.VirtualQuantity),
                 long(vm.OnTimeInMilliseconds))
+
+    def get_memory_usage(self, instance):
+        vm = self._lookup_vm(instance)
+        memory = self._get_vm_resources(vm, self._MEMORY_SETTING)[0]
+        memory_def = self._get_metric_def(self._MEMORY_METRIC_NAME)
+        metric_memory = self._get_metrics(memory, memory_def)
+        memory_usage = 0
+        if metric_memory:
+            memory_usage = long(metric_memory[0].MetricValue)
+        return memory_usage
 
     def get_vnic_metrics(self, vm_name):
         vm = self._lookup_vm(vm_name)
