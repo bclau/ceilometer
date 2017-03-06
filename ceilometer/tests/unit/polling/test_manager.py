@@ -383,10 +383,41 @@ class TestPollingAgent(BaseAgent):
     @mock.patch('ceilometer.polling.manager.PollingManager')
     def test_start(self, poll_manager):
         self.mgr.setup_polling_tasks = mock.MagicMock()
-        self.mgr.run()
-        poll_manager.assert_called_once_with(self.CONF)
+        self.mgr.start()
+        setup_polling.assert_called_once_with(self.CONF)
         self.mgr.setup_polling_tasks.assert_called_once_with()
-        self.mgr.terminate()
+
+        self.mgr.stop()
+        mpc.stop.assert_called_once_with()
+
+    @mock.patch('ceilometer.pipeline.setup_polling')
+    def test_start_with_pipeline_poller(self, setup_polling):
+        self.mgr.setup_polling_tasks = mock.MagicMock()
+        mpc = self.mgr.partition_coordinator
+        mpc.is_active.return_value = False
+        self.CONF.set_override('heartbeat', 1.0, group='coordination')
+        self.mgr.partition_coordinator.heartbeat = mock.MagicMock()
+
+        self.CONF.set_override('refresh_pipeline_cfg', True)
+        self.CONF.set_override('pipeline_polling_interval', 5)
+        self.addCleanup(self.mgr.stop)
+        self.mgr.start()
+        self.addCleanup(self.mgr.stop)
+        setup_polling.assert_called_once_with()
+        mpc.start.assert_called_once_with()
+        self.assertEqual(2, mpc.join_group.call_count)
+        self.mgr.setup_polling_tasks.assert_called_once_with()
+
+        # Wait first heatbeat
+        runs = 0
+        for i in six.moves.range(10):
+            runs = list(self.mgr.heartbeat_timer.iter_watchers())[0].runs
+            if runs > 0:
+                break
+            time.sleep(0.5)
+        self.assertGreaterEqual(1, runs)
+
+        self.assertEqual([], list(self.mgr.polling_periodics.iter_watchers()))
 
     def test_setup_polling_tasks(self):
         polling_tasks = self.mgr.setup_polling_tasks()
@@ -442,6 +473,49 @@ class TestPollingAgent(BaseAgent):
         key = 'test_polling_1-testanother'
         self.assertEqual(set(self.polling_cfg['sources'][1]['resources']),
                          set(per_task_resources[key].get({})))
+
+    def test_agent_manager_start(self):
+        mgr = self.create_manager()
+        mgr.extensions = self.mgr.extensions
+        mgr.create_polling_task = mock.MagicMock()
+        mgr.start()
+        self.addCleanup(mgr.stop)
+        mgr.create_polling_task.assert_called_once_with()
+
+    def test_agent_manager_start_fallback(self):
+        pipeline_cfg = {
+            'sources': [{
+                'name': 'test_pipeline',
+                'interval': 60,
+                'meters': ['test'],
+                'resources': ['test://'],
+                'sinks': ['test_sink']}],
+            'sinks': [{
+                'name': 'test_sink',
+                'transformers': [],
+                'publishers': ["test"]}]
+        }
+        tmp_cfg = tempfile.NamedTemporaryFile(mode='w', delete=False)
+        tmp_cfg.write(yaml.safe_dump(pipeline_cfg))
+        tmp_cfg.close()
+        self.CONF.set_override('pipeline_cfg_file', tmp_cfg.name)
+        self.CONF.set_override('cfg_file', None, group='polling')
+
+        mgr = self.create_manager()
+        mgr.extensions = self.mgr.extensions
+        mgr.create_polling_task = mock.MagicMock()
+        mgr.run()
+        self.addCleanup(mgr.terminate)
+        self.addCleanup(os.unlink, tmp_cfg.name)
+        mgr.create_polling_task.assert_called_once_with()
+
+    def test_manager_exception_persistency(self):
+        self.polling_cfg['sources'].append({
+            'name': 'test_polling_1',
+            'interval': 60,
+            'meters': ['testanother'],
+        })
+        self.setup_polling()
 
     def _verify_discovery_params(self, expected):
         self.assertEqual(expected, self.Discovery.params)

@@ -18,6 +18,7 @@ import cotyledon
 from cotyledon import oslo_config_glue
 from oslo_config import cfg
 from oslo_log import log
+from oslo_service import service as os_service
 
 from ceilometer.polling import manager
 from ceilometer import service
@@ -79,7 +80,5 @@ def main():
     conf = cfg.ConfigOpts()
     conf.register_cli_opts(CLI_OPTS)
     service.prepare_service(conf=conf)
-    sm = cotyledon.ServiceManager()
-    sm.add(create_polling_service, args=(conf,))
-    oslo_config_glue.setup(sm, conf)
-    sm.run()
+    os_service.launch(conf, manager.AgentManager(
+        conf, conf.polling_namespaces)).wait()

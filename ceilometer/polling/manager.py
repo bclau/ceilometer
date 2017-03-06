@@ -38,6 +38,7 @@ from ceilometer import keystone_client
 from ceilometer import messaging
 from ceilometer.polling import plugin_base
 from ceilometer.publisher import utils as publisher_utils
+from ceilometer import service_base
 from ceilometer import utils
 
 LOG = log.getLogger(__name__)
@@ -231,13 +232,13 @@ class PollingTask(object):
         )
 
 
-class AgentManager(cotyledon.Service):
+class AgentManager(service_base.PipelineBasedService):
 
-    def __init__(self, worker_id, conf, namespaces=None):
+    def __init__(self, conf, namespaces=None):
         namespaces = namespaces or ['compute', 'central']
         group_prefix = conf.polling.partitioning_group_prefix
 
-        super(AgentManager, self).__init__(worker_id)
+        super(AgentManager, self).__init__(conf)
 
         self.conf = conf
 
@@ -285,6 +286,21 @@ class AgentManager(cotyledon.Service):
 
         self._keystone = None
         self._keystone_last_exception = None
+
+    # FIXME(gordc): refactor pipeline dependency out of polling agent.
+    def reload_pipeline(self):
+        if self.pipeline_validated:
+            LOG.info(_LI("Reconfiguring polling tasks."))
+
+            # stop existing pollsters and leave partitioning groups
+            self.stop_pollsters_tasks()
+            for group in self.groups:
+                self.partition_coordinator.leave_group(group)
+
+            # re-create partitioning groups according to pipeline
+            # and configure polling tasks with latest pipeline conf
+            self.join_partitioning_groups()
+            self.start_polling_tasks()
 
     @staticmethod
     def _get_ext_mgr(namespace, *args, **kwargs):
@@ -388,16 +404,21 @@ class AgentManager(cotyledon.Service):
     def run(self):
         super(AgentManager, self).run()
         self.polling_manager = PollingManager(self.conf)
+
+    def start(self):
+        super(AgentManager, self).start()
+        self.polling_manager = PollingManager(self.conf)
         if self.partition_coordinator:
             self.partition_coordinator.start()
             self.join_partitioning_groups()
         self.start_polling_tasks()
 
-    def terminate(self):
-        self.stop_pollsters_tasks()
-        if self.partition_coordinator:
-            self.partition_coordinator.stop()
-        super(AgentManager, self).terminate()
+    def stop(self):
+        if self.started:
+            self.stop_pollsters_tasks()
+            if self.partition_coordinator:
+                self.partition_coordinator.stop()
+        super(AgentManager, self).stop()
 
     def interval_task(self, task):
         # NOTE(sileht): remove the previous keystone client

@@ -147,11 +147,11 @@ class NotificationService(cotyledon.Service):
     def _log_missing_pipeline(self, names):
         LOG.error(_('Could not load the following pipelines: %s'), names)
 
-    def run(self):
+    def start(self):
         # Delay startup so workers are jittered
         time.sleep(self.startup_delay)
 
-        super(NotificationService, self).run()
+        super(NotificationService, self).start()
         self.coord_lock = threading.Lock()
 
         self.managers = [ext.obj for ext in named.NamedExtensionManager(
@@ -269,3 +269,17 @@ class NotificationService(cotyledon.Service):
             self.kill_listeners(self.listeners)
 
         super(NotificationService, self).terminate()
+
+    def stop(self):
+        if self.started:
+            self.shutdown = True
+            if self.periodic:
+                self.periodic.stop()
+                self.periodic.wait()
+            if self.partition_coordinator:
+                self.partition_coordinator.stop()
+            with self.coord_lock:
+                if self.pipeline_listener:
+                    utils.kill_listeners([self.pipeline_listener])
+                utils.kill_listeners(self.listeners)
+        super(NotificationService, self).stop()
